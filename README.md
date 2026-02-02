@@ -1,6 +1,8 @@
 # inscenerator-xfs
 
-`inscenerator-xfs` is a Rust library providing a filesystem abstraction layer. It defines a common interface (`Xfs` trait) for filesystem operations, allowing you to write code that can run against the real operating system filesystem or an in-memory mock filesystem.
+`inscenerator-xfs` is a Rust library providing a filesystem abstraction layer. It defines a common interface (`Xfs` trait) for 
+filesystem operations, allowing you to write code that can run against the real operating system filesystem or an in-memory 
+mock filesystem.
 
 This is particularly useful for unit testing code that performs filesystem operations without actually hitting the disk.
 

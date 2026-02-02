@@ -1,51 +1,53 @@
-// use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
-use thiserror::Error;
+use snafu::{ResultExt, Snafu};
 
 pub mod mockfs;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Snafu)]
+#[snafu(visibility(pub))]
 pub enum XfsError {
-    #[error("IO error: {0}")]
-    GeneralIOError(String, #[source] std::io::Error),
+    #[snafu(display("IO error at {}: {}", path.display(), source))]
+    IoError {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 
-    #[error("Invalid type {0}")]
-    InvalidType(String),
+    #[snafu(display("File not found at {}", path.display()))]
+    NotFound { path: PathBuf },
 
-    #[error("unspecified error: {0}")]
-    UnspecifiedError(String),
+    #[snafu(display("File or directory already exists at {}", path.display()))]
+    AlreadyExists { path: PathBuf },
 
-    #[error("general error: {0}")]
-    GeneralError(
-        String,
-        #[source] Box<dyn std::error::Error + Send + Sync + 'static>,
-    ),
+    #[snafu(display("Path is not a directory: {}", path.display()))]
+    NotADirectory { path: PathBuf },
+
+    #[snafu(display("Path is not a file: {}", path.display()))]
+    NotAFile { path: PathBuf },
+
+    #[snafu(display("Path steps outside the sandbox: {}", path.display()))]
+    PathOutsideSandbox { path: PathBuf },
+
+    #[snafu(display("Invalid UTF-8 in file {}", path.display()))]
+    InvalidUtf8 { path: PathBuf },
+
+    #[snafu(display("General error: {}", message))]
+    GeneralError { message: String },
+
+    #[snafu(display("User error: {}", source))]
+    UserError {
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
-pub trait XfsErrorContext<T> {
-    fn xfs_error<C, F>(self, f: F) -> Result<T>
-    where
-        C: core::fmt::Display + Send + Sync + 'static,
-        F: FnOnce() -> C;
-}
+pub type Result<T> = std::result::Result<T, XfsError>;
 
-impl<T, E> XfsErrorContext<T> for std::result::Result<T, E>
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn xfs_error<C, F>(self, f: F) -> Result<T>
-    where
-        C: std::fmt::Display + Send + Sync + 'static,
-        F: FnOnce() -> C,
-    {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(XfsError::GeneralError(format!("{}", f()), Box::new(e))),
-        }
-    }
-}
+/// A result type for a single directory entry.
+pub type XfsEntryResult = Result<Box<dyn XfsDirEntry>>;
+
+/// An iterator over directory entries.
+pub type XfsReadDir = Box<dyn Iterator<Item = XfsEntryResult>>;
 
 pub trait XfsDirEntry {
     fn path(&self) -> PathBuf;
@@ -57,20 +59,31 @@ pub trait XfsMetadata {
     fn is_file(&self) -> bool;
 }
 
-pub type Result<T> = std::result::Result<T, XfsError>;
-
 pub trait Xfs {
-    fn on_each_entry(
-        &self,
-        p: &Path,
-        f: &mut dyn FnMut(&dyn Xfs, &dyn XfsDirEntry) -> anyhow::Result<()>,
-    ) -> anyhow::Result<()>;
-
-    fn on_each_entry_mut(
-        &mut self,
-        p: &Path,
-        f: &mut dyn FnMut(&mut dyn Xfs, &dyn XfsDirEntry) -> anyhow::Result<()>,
-    ) -> anyhow::Result<()>;
+    /// Returns an iterator over the entries within a directory.
+    ///
+    /// The iterator does not borrow the filesystem object, allowing
+    /// for mutation of the filesystem during iteration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path does not exist or is not a directory.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// # use inscenerator_xfs::{Xfs, mockfs::MockFS};
+    /// # let mut fs = MockFS::new();
+    /// # fs.add_file(Path::new("a.txt"), "content").unwrap();
+    /// for entry in fs.read_dir(Path::new(".")).unwrap() {
+    ///     let entry = entry.unwrap();
+    ///     println!("{:?}", entry.path());
+    ///     // Mutation is allowed during iteration
+    ///     fs.create_dir_all(Path::new("new_dir")).unwrap();
+    /// }
+    /// ```
+    fn read_dir(&self, p: &Path) -> Result<XfsReadDir>;
 
     fn reader(&self, p: &Path) -> Result<Box<dyn Read>>;
     fn writer(&mut self, p: &Path) -> Result<Box<dyn Write>>;
@@ -107,12 +120,7 @@ impl XfsDirEntry for std::fs::DirEntry {
     }
 
     fn metadata(&self) -> Result<Box<dyn XfsMetadata>> {
-        let md = std::fs::DirEntry::metadata(self).map_err(|e| {
-            XfsError::GeneralIOError(
-                "XfsDirEntry::metadata unable to get metadata".to_string(),
-                e,
-            )
-        })?;
+        let md = std::fs::DirEntry::metadata(self).context(IoSnafu { path: self.path() })?;
         Ok(Box::new(md))
     }
 }
@@ -128,88 +136,45 @@ impl XfsMetadata for std::fs::Metadata {
 }
 
 impl Xfs for OsFs {
-    fn on_each_entry(
-        &self,
-        p: &Path,
-        f: &mut dyn FnMut(&dyn Xfs, &dyn XfsDirEntry) -> anyhow::Result<()>,
-    ) -> anyhow::Result<()> {
-        for e in std::fs::read_dir(p).map_err(|e| {
-            XfsError::GeneralIOError(format!("osfs::on_each_entry({}) failed", p.display()), e)
-        })? {
-            f(self, &e?)?
-        }
-        Ok(())
-    }
-
-    fn on_each_entry_mut(
-        &mut self,
-        p: &Path,
-        f: &mut dyn FnMut(&mut dyn Xfs, &dyn XfsDirEntry) -> anyhow::Result<()>,
-    ) -> anyhow::Result<()> {
-        for e in std::fs::read_dir(p).map_err(|e| {
-            XfsError::GeneralIOError(
-                format!("osfs::on_each_entry_mut({}) failed", p.display()),
-                e,
-            )
-        })? {
-            f(self, &e?)?
-        }
-        Ok(())
+    fn read_dir(&self, p: &Path) -> Result<XfsReadDir> {
+        let path_buf = p.to_path_buf();
+        let read_dir = std::fs::read_dir(p).context(IoSnafu { path: p })?;
+        let iter = read_dir.map(move |entry| {
+            let entry = entry.context(IoSnafu { path: &path_buf })?;
+            let entry: Box<dyn XfsDirEntry> = Box::new(entry);
+            Ok(entry)
+        });
+        Ok(Box::new(iter))
     }
 
     fn writer(&mut self, p: &Path) -> Result<Box<dyn Write>> {
-        Ok(Box::new(BufWriter::new(std::fs::File::create(p).map_err(
-            |e| XfsError::GeneralIOError(format!("osfs::writer({}) failed", p.display()), e),
-        )?)))
+        let file = std::fs::File::create(p).context(IoSnafu { path: p })?;
+        Ok(Box::new(BufWriter::new(file)))
     }
 
     fn reader(&self, p: &Path) -> Result<Box<dyn Read>> {
-        Ok(Box::new(BufReader::new(std::fs::File::open(p).map_err(
-            |e| XfsError::GeneralIOError(format!("osfs::reader({}) failed", p.display()), e),
-        )?)))
+        let file = std::fs::File::open(p).context(IoSnafu { path: p })?;
+        Ok(Box::new(BufReader::new(file)))
     }
 
     fn create_dir(&mut self, p: &Path) -> Result<()> {
-        std::fs::create_dir(p).map_err(|e| {
-            XfsError::GeneralIOError(format!("osfs::create_dir({}) failed", p.display()), e)
-        })?;
+        std::fs::create_dir(p).context(IoSnafu { path: p })?;
         Ok(())
     }
 
     fn create_dir_all(&mut self, p: &Path) -> Result<()> {
-        std::fs::create_dir_all(p).map_err(|e| {
-            XfsError::GeneralIOError(format!("osfs::create_dir_all({}) failed", p.display()), e)
-        })?;
+        std::fs::create_dir_all(p).context(IoSnafu { path: p })?;
         Ok(())
     }
 
     fn read_all_lines(&self, p: &Path) -> Result<Vec<String>> {
-        let file = std::fs::File::open(p).map_err(|e| {
-            XfsError::GeneralIOError(
-                format!("osfs::read_all_lines({}) unable to open file", p.display()),
-                e,
-            )
-        })?;
-        let v: std::io::Result<Vec<_>> = BufReader::new(file).lines().collect();
-        v.map_err(|e| {
-            XfsError::GeneralIOError(
-                format!(
-                    "osfs::read_all_lines({}) error while reading lines",
-                    p.display()
-                ),
-                e,
-            )
-        })
+        let file = std::fs::File::open(p).context(IoSnafu { path: p })?;
+        let lines: std::io::Result<Vec<_>> = BufReader::new(file).lines().collect();
+        lines.context(IoSnafu { path: p })
     }
 
     fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata>> {
-        std::fs::metadata(p)
-            .map(|m| {
-                let b: Box<dyn XfsMetadata> = Box::new(m);
-                b
-            })
-            .map_err(|e| {
-                XfsError::GeneralIOError(format!("osfs::metadata({}) failed", p.display()), e)
-            })
+        let m = std::fs::metadata(p).context(IoSnafu { path: p })?;
+        Ok(Box::new(m))
     }
 }

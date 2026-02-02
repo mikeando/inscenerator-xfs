@@ -3,6 +3,11 @@ name = "inscenerator-xfs"
 version = "0.1.0"
 authors = ["Michael Anderson <drmikeando@gmail.com>"]
 edition = "2018"
+license = "MIT"
+description = "Filesystem based hierarchical text/data format"
+homepage = "https://github.com/mikeando/inscenerator-xfs"
+repository = "https://github.com/mikeando/inscenerator-xfs"
+readme = "README.md"
 
 [dependencies]
 thiserror = "1.0"

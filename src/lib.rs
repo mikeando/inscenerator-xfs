@@ -14,11 +14,23 @@ pub enum XfsError {
         source: std::io::Error,
     },
 
-    #[snafu(display("Invalid type: {}", message))]
-    InvalidType { message: String },
+    #[snafu(display("File not found at {}", path.display()))]
+    NotFound { path: PathBuf },
 
-    #[snafu(display("Error at {}: {}", path.display(), message))]
-    PathError { path: PathBuf, message: String },
+    #[snafu(display("File or directory already exists at {}", path.display()))]
+    AlreadyExists { path: PathBuf },
+
+    #[snafu(display("Path is not a directory: {}", path.display()))]
+    NotADirectory { path: PathBuf },
+
+    #[snafu(display("Path is not a file: {}", path.display()))]
+    NotAFile { path: PathBuf },
+
+    #[snafu(display("Path steps outside the sandbox: {}", path.display()))]
+    PathOutsideSandbox { path: PathBuf },
+
+    #[snafu(display("Invalid UTF-8 in file {}", path.display()))]
+    InvalidUtf8 { path: PathBuf },
 
     #[snafu(display("General error: {}", message))]
     GeneralError { message: String },
@@ -31,6 +43,12 @@ pub enum XfsError {
 
 pub type Result<T> = std::result::Result<T, XfsError>;
 
+/// A result type for a single directory entry.
+pub type XfsEntryResult = Result<Box<dyn XfsDirEntry>>;
+
+/// An iterator over directory entries.
+pub type XfsReadDir = Box<dyn Iterator<Item = XfsEntryResult>>;
+
 pub trait XfsDirEntry {
     fn path(&self) -> PathBuf;
     fn metadata(&self) -> Result<Box<dyn XfsMetadata>>;
@@ -42,10 +60,30 @@ pub trait XfsMetadata {
 }
 
 pub trait Xfs {
-    fn read_dir<'a>(
-        &'a self,
-        p: &Path,
-    ) -> Result<Box<dyn Iterator<Item = Result<Box<dyn XfsDirEntry>>> + 'a>>;
+    /// Returns an iterator over the entries within a directory.
+    ///
+    /// The iterator does not borrow the filesystem object, allowing
+    /// for mutation of the filesystem during iteration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path does not exist or is not a directory.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// # use inscenerator_xfs::{Xfs, mockfs::MockFS};
+    /// # let mut fs = MockFS::new();
+    /// # fs.add_file(Path::new("a.txt"), "content").unwrap();
+    /// for entry in fs.read_dir(Path::new(".")).unwrap() {
+    ///     let entry = entry.unwrap();
+    ///     println!("{:?}", entry.path());
+    ///     // Mutation is allowed during iteration
+    ///     fs.create_dir_all(Path::new("new_dir")).unwrap();
+    /// }
+    /// ```
+    fn read_dir(&self, p: &Path) -> Result<XfsReadDir>;
 
     fn reader(&self, p: &Path) -> Result<Box<dyn Read>>;
     fn writer(&mut self, p: &Path) -> Result<Box<dyn Write>>;
@@ -98,10 +136,7 @@ impl XfsMetadata for std::fs::Metadata {
 }
 
 impl Xfs for OsFs {
-    fn read_dir<'a>(
-        &'a self,
-        p: &Path,
-    ) -> Result<Box<dyn Iterator<Item = Result<Box<dyn XfsDirEntry>>> + 'a>> {
+    fn read_dir(&self, p: &Path) -> Result<XfsReadDir> {
         let path_buf = p.to_path_buf();
         let read_dir = std::fs::read_dir(p).context(IoSnafu { path: p })?;
         let iter = read_dir.map(move |entry| {

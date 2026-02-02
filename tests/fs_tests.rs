@@ -52,17 +52,15 @@ fn test_mockfs_read_dir() {
 }
 
 #[test]
-fn test_mockfs_read_dir_mut() {
+fn test_mockfs_read_dir_mutation() {
     let mut fs = MockFS::new();
     fs.add_file(Path::new("a.txt"), "a").unwrap();
 
-    // In the new iterator approach, we can just loop and use fs_mut
-    let paths: Vec<_> = fs.read_dir(Path::new("")).unwrap()
-        .map(|de| de.unwrap().path())
-        .collect();
-
-    for path in paths {
-        if path == Path::new("a.txt") {
+    // We can now iterate and mutate directly because the iterator
+    // doesn't hold a borrow on the MockFS (it collected entries up front).
+    for de in fs.read_dir(Path::new("")).unwrap() {
+        let de = de.unwrap();
+        if de.path() == Path::new("a.txt") {
             let mut w = fs.writer(Path::new("b.txt")).unwrap();
             w.write_all(b"b").unwrap();
         }

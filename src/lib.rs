@@ -92,6 +92,12 @@ pub trait Xfs {
 
     fn create_dir_all(&mut self, p: &Path) -> Result<()>;
 
+    fn remove_file(&mut self, p: &Path) -> Result<()>;
+
+    fn remove_dir_all(&mut self, p: &Path) -> Result<()>;
+
+    fn rename(&mut self, from: &Path, to: &Path) -> Result<()>;
+
     fn read_all_lines(&self, p: &Path) -> Result<Vec<String>>;
 
     fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata>>;
@@ -164,6 +170,21 @@ impl Xfs for OsFs {
 
     fn create_dir_all(&mut self, p: &Path) -> Result<()> {
         std::fs::create_dir_all(p).context(IoSnafu { path: p })?;
+        Ok(())
+    }
+
+    fn remove_file(&mut self, p: &Path) -> Result<()> {
+        std::fs::remove_file(p).context(IoSnafu { path: p })?;
+        Ok(())
+    }
+
+    fn remove_dir_all(&mut self, p: &Path) -> Result<()> {
+        std::fs::remove_dir_all(p).context(IoSnafu { path: p })?;
+        Ok(())
+    }
+
+    fn rename(&mut self, from: &Path, to: &Path) -> Result<()> {
+        std::fs::rename(from, to).context(IoSnafu { path: from })?;
         Ok(())
     }
 

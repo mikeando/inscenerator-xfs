@@ -18,6 +18,43 @@ fn test_mockfs_basic() {
 }
 
 #[test]
+fn test_mockfs_multithreaded() {
+    use std::thread;
+
+    let fs = MockFS::new();
+    let mut handles = vec![];
+
+    for i in 0..10 {
+        let mut fs_clone = fs.unsafe_clone();
+        let handle = thread::spawn(move || {
+            let path_str = format!("file_{}.txt", i);
+            let path = Path::new(&path_str);
+            let content = format!("content {}", i);
+            {
+                let mut w = fs_clone.writer(path).unwrap();
+                w.write_all(content.as_bytes()).unwrap();
+            }
+
+            let mut reader = fs_clone.reader(path).unwrap();
+            let mut buf = String::new();
+            reader.read_to_string(&mut buf).unwrap();
+            assert_eq!(buf, content);
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // Verify all files exist
+    for i in 0..10 {
+        let path_str = format!("file_{}.txt", i);
+        assert!(fs.is_file(Path::new(&path_str)));
+    }
+}
+
+#[test]
 fn test_mockfs_remove_file() {
     let mut fs = MockFS::new();
     let path = Path::new("test.txt");

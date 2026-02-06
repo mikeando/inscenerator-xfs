@@ -430,6 +430,121 @@ impl Xfs for MockFS {
         Ok(())
     }
 
+    fn remove_file(&mut self, p: &Path) -> Result<()> {
+        let pp = p.parent().ok_or_else(|| XfsError::NotFound {
+            path: p.to_path_buf(),
+        })?;
+        let parent_dir = self
+            .resolve_path_mut(pp)
+            .map_err(|_| XfsError::NotFound {
+                path: pp.to_path_buf(),
+            })?
+            .as_dir_mut()
+            .map_err(|_| XfsError::NotADirectory {
+                path: pp.to_path_buf(),
+            })?;
+
+        let file_name = p.file_name().ok_or_else(|| XfsError::NotFound {
+            path: p.to_path_buf(),
+        })?;
+
+        match parent_dir.entries.get(file_name) {
+            Some(MockFSEntry::File(_)) => {
+                parent_dir.entries.remove(file_name);
+                Ok(())
+            }
+            Some(MockFSEntry::Directory(_)) => NotAFileSnafu {
+                path: p.to_path_buf(),
+            }
+            .fail(),
+            None => Err(XfsError::NotFound {
+                path: p.to_path_buf(),
+            }),
+        }
+    }
+
+    fn remove_dir_all(&mut self, p: &Path) -> Result<()> {
+        let pp = p.parent().ok_or_else(|| XfsError::NotFound {
+            path: p.to_path_buf(),
+        })?;
+        let parent_dir = self
+            .resolve_path_mut(pp)
+            .map_err(|_| XfsError::NotFound {
+                path: pp.to_path_buf(),
+            })?
+            .as_dir_mut()
+            .map_err(|_| XfsError::NotADirectory {
+                path: pp.to_path_buf(),
+            })?;
+
+        let name = p.file_name().ok_or_else(|| XfsError::NotFound {
+            path: p.to_path_buf(),
+        })?;
+
+        match parent_dir.entries.get(name) {
+            Some(MockFSEntry::Directory(_)) => {
+                parent_dir.entries.remove(name);
+                Ok(())
+            }
+            Some(MockFSEntry::File(_)) => NotADirectorySnafu {
+                path: p.to_path_buf(),
+            }
+            .fail(),
+            None => Err(XfsError::NotFound {
+                path: p.to_path_buf(),
+            }),
+        }
+    }
+
+    fn rename(&mut self, from: &Path, to: &Path) -> Result<()> {
+        if from == to {
+            return Ok(());
+        }
+        let from_pp = from.parent().ok_or_else(|| XfsError::NotFound {
+            path: from.to_path_buf(),
+        })?;
+        let from_name = from.file_name().ok_or_else(|| XfsError::NotFound {
+            path: from.to_path_buf(),
+        })?;
+
+        let to_pp = to.parent().ok_or_else(|| XfsError::NotFound {
+            path: to.to_path_buf(),
+        })?;
+        let to_name = to.file_name().ok_or_else(|| XfsError::NotFound {
+            path: to.to_path_buf(),
+        })?;
+
+        // 1. Ensure 'from' exists.
+        self.resolve_path(from)?;
+
+        // 2. Ensure 'to' parent exists and is a directory.
+        self.resolve_path(to_pp)?
+            .as_dir()
+            .map_err(|_| XfsError::NotADirectory {
+                path: to_pp.to_path_buf(),
+            })?;
+
+        // 3. Perform the move.
+        let entry = {
+            let from_parent = self
+                .resolve_path_mut(from_pp)?
+                .as_dir_mut()
+                .map_err(|_| XfsError::NotADirectory {
+                    path: from_pp.to_path_buf(),
+                })?;
+            from_parent.entries.remove(from_name).unwrap() // We already checked it exists
+        };
+
+        let to_parent = self
+            .resolve_path_mut(to_pp)?
+            .as_dir_mut()
+            .unwrap(); // We already checked it exists and is a dir
+
+        to_parent.entries.insert(to_name.to_os_string(), entry);
+
+        Ok(())
+    }
+
     fn read_all_lines(&self, p: &Path) -> Result<Vec<String>> {
         let file = self
             .resolve_path(p)

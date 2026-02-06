@@ -18,6 +18,106 @@ fn test_mockfs_basic() {
 }
 
 #[test]
+fn test_mockfs_remove_file() {
+    let mut fs = MockFS::new();
+    let path = Path::new("test.txt");
+    fs.add_file(path, "hello").unwrap();
+    assert!(fs.exists(path));
+    fs.remove_file(path).unwrap();
+    assert!(!fs.exists(path));
+}
+
+#[test]
+fn test_mockfs_remove_dir_all() {
+    let mut fs = MockFS::new();
+    fs.add_file(Path::new("dir/a.txt"), "a").unwrap();
+    fs.add_file(Path::new("dir/subdir/b.txt"), "b").unwrap();
+    assert!(fs.is_dir(Path::new("dir")));
+    fs.remove_dir_all(Path::new("dir")).unwrap();
+    assert!(!fs.exists(Path::new("dir")));
+    assert!(!fs.exists(Path::new("dir/a.txt")));
+}
+
+#[test]
+fn test_mockfs_rename() {
+    let mut fs = MockFS::new();
+    fs.add_file(Path::new("old.txt"), "content").unwrap();
+    fs.rename(Path::new("old.txt"), Path::new("new.txt")).unwrap();
+    assert!(!fs.exists(Path::new("old.txt")));
+    assert!(fs.is_file(Path::new("new.txt")));
+    assert_eq!(fs.get(Path::new("new.txt")).unwrap(), b"content");
+}
+
+#[test]
+fn test_osfs_remove_file() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut fs = OsFs {};
+    let path = temp_dir.path().join("test.txt");
+
+    fs.writer(&path).unwrap().write_all(b"hello").unwrap();
+    assert!(fs.exists(&path));
+    fs.remove_file(&path).unwrap();
+    assert!(!fs.exists(&path));
+}
+
+#[test]
+fn test_osfs_rename() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut fs = OsFs {};
+    let old_path = temp_dir.path().join("old.txt");
+    let new_path = temp_dir.path().join("new.txt");
+
+    fs.writer(&old_path).unwrap().write_all(b"content").unwrap();
+    fs.rename(&old_path, &new_path).unwrap();
+    assert!(!fs.exists(&old_path));
+    assert!(fs.exists(&new_path));
+}
+
+#[test]
+fn test_osfs_remove_dir_all() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut fs = OsFs {};
+    let dir_path = temp_dir.path().join("dir");
+
+    fs.create_dir(&dir_path).unwrap();
+    fs.writer(&dir_path.join("file.txt"))
+        .unwrap()
+        .write_all(b"a")
+        .unwrap();
+    fs.remove_dir_all(&dir_path).unwrap();
+    assert!(!fs.exists(&dir_path));
+}
+
+#[test]
+fn test_mockfs_remove_file_error() {
+    let mut fs = MockFS::new();
+    fs.create_dir(Path::new("dir")).unwrap();
+
+    // remove_file on a directory should fail
+    let res = fs.remove_file(Path::new("dir"));
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_mockfs_remove_dir_all_error() {
+    let mut fs = MockFS::new();
+    fs.add_file(Path::new("file.txt"), "content").unwrap();
+
+    // remove_dir_all on a file should fail
+    let res = fs.remove_dir_all(Path::new("file.txt"));
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_mockfs_rename_error() {
+    let mut fs = MockFS::new();
+
+    // rename non-existent should fail
+    let res = fs.rename(Path::new("none"), Path::new("new"));
+    assert!(res.is_err());
+}
+
+#[test]
 fn test_mockfs_copy_recursive() {
     let mut fs1 = MockFS::new();
     fs1.add_file(Path::new("dir/a.txt"), "a").unwrap();

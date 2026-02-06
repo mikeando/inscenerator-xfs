@@ -59,8 +59,12 @@ pub trait XfsMetadata {
     fn is_file(&self) -> bool;
 }
 
+/// A read-only interface to a filesystem.
 pub trait XfsReadOnly: Send {
     /// Creates a new read-only handle to the same underlying filesystem.
+    ///
+    /// Any mutations performed on the filesystem through other handles will be
+    /// visible through this clone.
     fn unsafe_clone(&self) -> Box<dyn XfsReadOnly>;
 
     /// Returns an iterator over the entries within a directory.
@@ -83,34 +87,58 @@ pub trait XfsReadOnly: Send {
     /// for entry in fs.read_dir(Path::new(".")).unwrap() {
     ///     let entry = entry.unwrap();
     ///     println!("{:?}", entry.path());
-    ///     // Mutation is allowed during iteration
+    ///     // Mutation is allowed during iteration if you have mutable access to fs
     ///     fs.create_dir_all(Path::new("new_dir")).unwrap();
     /// }
     /// ```
     fn read_dir(&self, p: &Path) -> Result<XfsReadDir>;
 
+    /// Opens a file for reading.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path does not exist, is a directory, or
+    /// if there is an IO error.
     fn reader(&self, p: &Path) -> Result<Box<dyn Read>>;
 
+    /// Reads all lines from a file as strings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path does not exist, is a directory, contains
+    /// invalid UTF-8, or if there is an IO error.
     fn read_all_lines(&self, p: &Path) -> Result<Vec<String>>;
 
+    /// Returns metadata for the specified path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path does not exist or if there is an IO error.
     fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata>>;
 
+    /// Checks if a path exists.
+    ///
     /// IO Errors are treated as-if the file does not exist.
     fn exists(&self, p: &Path) -> bool {
         self.metadata(p).is_ok()
     }
 
+    /// Checks if a path exists and is a directory.
+    ///
     /// IO Errors are treated as-if the path is not a directory.
     fn is_dir(&self, p: &Path) -> bool {
         self.metadata(p).map(|md| md.is_dir()).unwrap_or(false)
     }
 
+    /// Checks if a path exists and is a file.
+    ///
     /// IO Errors are treated as-if the path is not a file.
     fn is_file(&self, p: &Path) -> bool {
         self.metadata(p).map(|md| md.is_file()).unwrap_or(false)
     }
 }
 
+/// A read-write interface to a filesystem.
 pub trait Xfs: XfsReadOnly {
     /// Creates a new handle to the same underlying filesystem.
     ///
@@ -127,10 +155,28 @@ pub trait Xfs: XfsReadOnly {
     /// all other clones.
     fn unsafe_clone_mut(&mut self) -> Box<dyn Xfs>;
 
+    /// Creates a new file or truncates an existing one for writing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the parent directory does not exist, or if there is
+    /// an IO error.
     fn writer(&mut self, p: &Path) -> Result<Box<dyn Write>>;
 
+    /// Creates a new directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the parent directory does not exist, or if the
+    /// directory already exists.
     fn create_dir(&mut self, p: &Path) -> Result<()>;
 
+    /// Recursively creates a directory and all of its parent components if they
+    /// are missing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the components exist but are not directories.
     fn create_dir_all(&mut self, p: &Path) -> Result<()>;
 
     /// Deletes a single file.

@@ -18,6 +18,34 @@ fn test_mockfs_basic() {
 }
 
 #[test]
+fn test_mockfs_readonly_multithreaded() {
+    use std::thread;
+
+    let mut fs = MockFS::new();
+    let path = Path::new("shared.txt");
+    let content = "shared content";
+    fs.add_file(path, content).unwrap();
+
+    let fs_ref: &dyn Xfs = &fs;
+    let mut handles = vec![];
+
+    for _ in 0..10 {
+        let fs_readonly = fs_ref.unsafe_clone();
+        let handle = thread::spawn(move || {
+            let mut reader = fs_readonly.reader(Path::new("shared.txt")).unwrap();
+            let mut buf = String::new();
+            reader.read_to_string(&mut buf).unwrap();
+            assert_eq!(buf, "shared content");
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+}
+
+#[test]
 fn test_mockfs_multithreaded() {
     use std::thread;
 
@@ -52,6 +80,16 @@ fn test_mockfs_multithreaded() {
         let path_str = format!("file_{}.txt", i);
         assert!(fs.is_file(Path::new(&path_str)));
     }
+}
+
+#[test]
+fn test_mockfs_writable_clone() {
+    let mut fs = MockFS::new();
+    let mut fs_clone = fs.unsafe_clone_mut();
+
+    fs_clone.writer(Path::new("test.txt")).unwrap().write_all(b"hello").unwrap();
+
+    assert!(fs.is_file(Path::new("test.txt")));
 }
 
 #[test]

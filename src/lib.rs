@@ -59,7 +59,22 @@ pub trait XfsMetadata {
     fn is_file(&self) -> bool;
 }
 
-pub trait Xfs {
+pub trait Xfs: Send {
+    /// Creates a new handle to the same underlying filesystem.
+    ///
+    /// # Safety
+    ///
+    /// This is named `unsafe_clone` because it provides no safety for concurrent
+    /// changes to the same parts of the filesystem. It will be safe for operating
+    /// on distinct parts, but that is up to the user to ensure.
+    ///
+    /// For example, moving a directory on one thread while another thread is
+    /// writing into a file inside that directory is undefined and should be avoided.
+    ///
+    /// Any mutation performed on the clone will be visible to the original and
+    /// all other clones.
+    fn unsafe_clone(&self) -> Box<dyn Xfs>;
+
     /// Returns an iterator over the entries within a directory.
     ///
     /// The iterator does not borrow the filesystem object, allowing
@@ -160,6 +175,10 @@ impl XfsMetadata for std::fs::Metadata {
 }
 
 impl Xfs for OsFs {
+    fn unsafe_clone(&self) -> Box<dyn Xfs> {
+        Box::new(OsFs {})
+    }
+
     fn read_dir(&self, p: &Path) -> Result<XfsReadDir> {
         let path_buf = p.to_path_buf();
         let read_dir = std::fs::read_dir(p).context(IoSnafu { path: p })?;

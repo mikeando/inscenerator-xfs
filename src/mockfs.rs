@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use crate::{Result, Xfs, XfsDirEntry, XfsError, XfsMetadata, XfsReadDir, AlreadyExistsSnafu, NotADirectorySnafu, NotAFileSnafu, GeneralSnafu};
+use crate::{Result, Xfs, XfsReadOnly, XfsDirEntry, XfsError, XfsMetadata, XfsReadDir, AlreadyExistsSnafu, NotADirectorySnafu, NotAFileSnafu, GeneralSnafu};
 
 pub struct MockWriter {
     data: Arc<RwLock<Vec<u8>>>,
@@ -268,7 +268,7 @@ impl MockFS {
 
     pub fn copy_recursive(
         &mut self,
-        other_fs: &dyn Xfs,
+        other_fs: &dyn XfsReadOnly,
         other_path: &Path,
         self_path: &Path,
     ) -> Result<()> {
@@ -356,8 +356,8 @@ impl XfsMetadata for MockMetadata {
     }
 }
 
-impl Xfs for MockFS {
-    fn unsafe_clone(&self) -> Box<dyn Xfs> {
+impl XfsReadOnly for MockFS {
+    fn unsafe_clone(&self) -> Box<dyn XfsReadOnly> {
         Box::new(MockFS {
             root: self.root.clone(),
         })
@@ -391,6 +391,36 @@ impl Xfs for MockFS {
             data: f.contents.clone(),
         };
         Ok(Box::new(r))
+    }
+
+    fn read_all_lines(&self, p: &Path) -> Result<Vec<String>> {
+        let root = self.root.read().unwrap();
+        let file = Self::resolve_path(&root, p)
+            .map_err(|_| XfsError::NotFound { path: p.to_path_buf() })?
+            .as_file().map_err(|_| XfsError::NotAFile { path: p.to_path_buf() })?;
+        let data = file.contents.read().unwrap();
+
+        let s = std::str::from_utf8(data.as_slice())
+            .map_err(|_| XfsError::InvalidUtf8 {
+                path: p.to_path_buf(),
+            })?;
+        let lines = s.lines().map(|s| s.to_string()).collect();
+        Ok(lines)
+    }
+
+    fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata>> {
+        let root = self.root.read().unwrap();
+        let entry = Self::resolve_path(&root, p)
+            .map_err(|_| XfsError::NotFound { path: p.to_path_buf() })?;
+        Ok(Box::new(entry.metadata()))
+    }
+}
+
+impl Xfs for MockFS {
+    fn unsafe_clone_mut(&mut self) -> Box<dyn Xfs> {
+        Box::new(MockFS {
+            root: self.root.clone(),
+        })
     }
 
     fn writer(&mut self, p: &Path) -> Result<Box<dyn std::io::Write>> {
@@ -554,27 +584,5 @@ impl Xfs for MockFS {
         to_parent.entries.insert(to_name.to_os_string(), entry);
 
         Ok(())
-    }
-
-    fn read_all_lines(&self, p: &Path) -> Result<Vec<String>> {
-        let root = self.root.read().unwrap();
-        let file = Self::resolve_path(&root, p)
-            .map_err(|_| XfsError::NotFound { path: p.to_path_buf() })?
-            .as_file().map_err(|_| XfsError::NotAFile { path: p.to_path_buf() })?;
-        let data = file.contents.read().unwrap();
-
-        let s = std::str::from_utf8(data.as_slice())
-            .map_err(|_| XfsError::InvalidUtf8 {
-                path: p.to_path_buf(),
-            })?;
-        let lines = s.lines().map(|s| s.to_string()).collect();
-        Ok(lines)
-    }
-
-    fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata>> {
-        let root = self.root.read().unwrap();
-        let entry = Self::resolve_path(&root, p)
-            .map_err(|_| XfsError::NotFound { path: p.to_path_buf() })?;
-        Ok(Box::new(entry.metadata()))
     }
 }

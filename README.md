@@ -1,10 +1,19 @@
 # inscenerator-xfs
 
-`inscenerator-xfs` is a Rust library providing a filesystem abstraction layer. It defines a common interface (`Xfs` trait) for 
+`inscenerator-xfs` is a Rust library providing a filesystem abstraction layer. It defines a common interface for
 filesystem operations, allowing you to write code that can run against the real operating system filesystem or an in-memory 
 mock filesystem.
 
 This is particularly useful for unit testing code that performs filesystem operations without actually hitting the disk.
+
+## Traits
+
+The library provides two main traits:
+
+- **`XfsReadOnly`**: Contains methods for read-only operations like `reader`, `read_dir`, and `metadata`. It also provides `unsafe_clone()` which returns a new read-only handle.
+- **`Xfs`**: Inherits from `XfsReadOnly` and adds methods for mutations like `writer`, `create_dir`, and `remove_file`. It provides `unsafe_clone_mut()` which returns a new mutable handle.
+
+This separation ensures that a read-only reference (`&dyn XfsReadOnly` or `&dyn Xfs`) cannot be used to obtain a mutable handle at compile-time.
 
 ## Installation
 
@@ -37,13 +46,13 @@ Testing this function requires creating an actual file on disk, which can be slo
 
 ### The Solution: Using `inscenerator-xfs`
 
-Refactor your function to accept an implementation of the `Xfs` trait:
+Refactor your function to accept an implementation of the `XfsReadOnly` trait:
 
 ```rust
-use inscenerator_xfs::Xfs;
+use inscenerator_xfs::XfsReadOnly;
 use std::path::Path;
 
-fn process_config(fs: &dyn Xfs, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn process_config(fs: &dyn XfsReadOnly, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let lines = fs.read_all_lines(path)?;
     for line in lines {
         println!("Config line: {}", line);
@@ -77,9 +86,33 @@ mod tests {
 }
 ```
 
+### Thread Safety and Cloning
+
+Both `OsFs` and `MockFS` support cloning to provide multiple handles to the same underlying filesystem. This is useful for multi-threaded operations.
+
+- Use `fs.unsafe_clone()` to get a read-only handle from a shared reference.
+- Use `fs.unsafe_clone_mut()` to get a mutable handle from a mutable reference.
+
+```rust
+use std::thread;
+use inscenerator_xfs::{Xfs, mockfs::MockFS};
+use std::path::Path;
+use std::io::Write;
+
+let mut fs = MockFS::new();
+let mut fs_clone = fs.unsafe_clone_mut();
+
+thread::spawn(move || {
+    let mut w = fs_clone.writer(Path::new("file.txt")).unwrap();
+    w.write_all(b"hello from thread").unwrap();
+}).join().unwrap();
+```
+
+Note: These are called "unsafe" because they do not provide protection against concurrent mutations to the *same* paths. It is up to the user to coordinate access to disjoint parts of the directory tree.
+
 ## Features
 
-- **`Xfs` Trait**: A common interface for filesystem operations like reading, writing, and directory traversal.
+- **Trait-based Abstraction**: `XfsReadOnly` and `Xfs` traits for flexible filesystem access.
 - **`OsFs`**: A wrapper around `std::fs` for real filesystem access.
 - **`MockFS`**: An in-memory filesystem implementation for testing.
 

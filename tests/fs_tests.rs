@@ -1,4 +1,4 @@
-use inscenerator_xfs::{OsFs, Xfs};
+use inscenerator_xfs::{OsFs, Xfs, XfsReadOnly};
 use inscenerator_xfs::mockfs::MockFS;
 use std::path::Path;
 use std::io::{Read, Write};
@@ -21,11 +21,11 @@ fn test_mockfs_basic() {
 fn test_mockfs_multithreaded() {
     use std::thread;
 
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     let mut handles = vec![];
 
     for i in 0..10 {
-        let mut fs_clone = fs.unsafe_clone();
+        let mut fs_clone = fs.unsafe_clone_mut();
         let handle = thread::spawn(move || {
             let path_str = format!("file_{}.txt", i);
             let path = Path::new(&path_str);

@@ -220,6 +220,14 @@ impl MockFS {
         Ok(data)
     }
 
+    pub fn get_str(&self, p: &Path) -> Result<String> {
+        let data = self.get(p)?;
+        let s = std::str::from_utf8(data.as_slice()).map_err(|_| XfsError::InvalidUtf8 {
+            path: p.to_path_buf(),
+        })?;
+        Ok(s.to_string())
+    }
+
     pub fn resolve_path(&self, p: &Path) -> Result<MockFSEntry> {
         let mut result = self.root.clone();
         for pc in Self::normalize_path(p)? {

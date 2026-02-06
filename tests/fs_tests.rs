@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 
 #[test]
 fn test_mockfs_basic() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     let path = Path::new("test.txt");
     let content = "hello world";
 
@@ -19,19 +19,21 @@ fn test_mockfs_basic() {
 
 #[test]
 fn test_mockfs_multithreaded() {
-    use std::sync::Arc;
     use std::thread;
 
-    let fs = Arc::new(MockFS::new());
+    let fs = MockFS::new();
     let mut handles = vec![];
 
     for i in 0..10 {
-        let fs_clone = Arc::clone(&fs);
+        let mut fs_clone = fs.unsafe_clone();
         let handle = thread::spawn(move || {
             let path_str = format!("file_{}.txt", i);
             let path = Path::new(&path_str);
             let content = format!("content {}", i);
-            fs_clone.add_file(path, &content).unwrap();
+            {
+                let mut w = fs_clone.writer(path).unwrap();
+                w.write_all(content.as_bytes()).unwrap();
+            }
 
             let mut reader = fs_clone.reader(path).unwrap();
             let mut buf = String::new();
@@ -54,7 +56,7 @@ fn test_mockfs_multithreaded() {
 
 #[test]
 fn test_mockfs_remove_file() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     let path = Path::new("test.txt");
     fs.add_file(path, "hello").unwrap();
     assert!(fs.exists(path));
@@ -64,7 +66,7 @@ fn test_mockfs_remove_file() {
 
 #[test]
 fn test_mockfs_remove_dir_all() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     fs.add_file(Path::new("dir/a.txt"), "a").unwrap();
     fs.add_file(Path::new("dir/subdir/b.txt"), "b").unwrap();
     assert!(fs.is_dir(Path::new("dir")));
@@ -75,7 +77,7 @@ fn test_mockfs_remove_dir_all() {
 
 #[test]
 fn test_mockfs_rename() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     fs.add_file(Path::new("old.txt"), "content").unwrap();
     fs.rename(Path::new("old.txt"), Path::new("new.txt")).unwrap();
     assert!(!fs.exists(Path::new("old.txt")));
@@ -86,7 +88,7 @@ fn test_mockfs_rename() {
 #[test]
 fn test_osfs_remove_file() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let fs = OsFs {};
+    let mut fs = OsFs {};
     let path = temp_dir.path().join("test.txt");
 
     fs.writer(&path).unwrap().write_all(b"hello").unwrap();
@@ -98,7 +100,7 @@ fn test_osfs_remove_file() {
 #[test]
 fn test_osfs_rename() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let fs = OsFs {};
+    let mut fs = OsFs {};
     let old_path = temp_dir.path().join("old.txt");
     let new_path = temp_dir.path().join("new.txt");
 
@@ -111,7 +113,7 @@ fn test_osfs_rename() {
 #[test]
 fn test_osfs_remove_dir_all() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let fs = OsFs {};
+    let mut fs = OsFs {};
     let dir_path = temp_dir.path().join("dir");
 
     fs.create_dir(&dir_path).unwrap();
@@ -125,7 +127,7 @@ fn test_osfs_remove_dir_all() {
 
 #[test]
 fn test_mockfs_remove_file_error() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     fs.create_dir(Path::new("dir")).unwrap();
 
     // remove_file on a directory should fail
@@ -135,7 +137,7 @@ fn test_mockfs_remove_file_error() {
 
 #[test]
 fn test_mockfs_remove_dir_all_error() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     fs.add_file(Path::new("file.txt"), "content").unwrap();
 
     // remove_dir_all on a file should fail
@@ -145,7 +147,7 @@ fn test_mockfs_remove_dir_all_error() {
 
 #[test]
 fn test_mockfs_rename_error() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
 
     // rename non-existent should fail
     let res = fs.rename(Path::new("none"), Path::new("new"));
@@ -154,11 +156,11 @@ fn test_mockfs_rename_error() {
 
 #[test]
 fn test_mockfs_copy_recursive() {
-    let fs1 = MockFS::new();
+    let mut fs1 = MockFS::new();
     fs1.add_file(Path::new("dir/a.txt"), "a").unwrap();
     fs1.add_file(Path::new("dir/subdir/b.txt"), "b").unwrap();
 
-    let fs2 = MockFS::new();
+    let mut fs2 = MockFS::new();
     fs2.copy_recursive(&fs1, Path::new("dir"), Path::new("copied")).unwrap();
 
     assert!(fs2.is_file(Path::new("copied/a.txt")));
@@ -171,7 +173,7 @@ fn test_mockfs_copy_recursive() {
 
 #[test]
 fn test_mockfs_read_dir() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     fs.add_file(Path::new("a.txt"), "a").unwrap();
     fs.add_file(Path::new("b.txt"), "b").unwrap();
 
@@ -188,7 +190,7 @@ fn test_mockfs_read_dir() {
 
 #[test]
 fn test_mockfs_read_dir_mutation() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     fs.add_file(Path::new("a.txt"), "a").unwrap();
 
     // We can now iterate and mutate directly because the iterator
@@ -206,7 +208,7 @@ fn test_mockfs_read_dir_mutation() {
 
 #[test]
 fn test_mockfs_directories() {
-    let fs = MockFS::new();
+    let mut fs = MockFS::new();
     fs.create_dir_all(Path::new("a/b/c")).unwrap();
     assert!(fs.is_dir(Path::new("a")));
     assert!(fs.is_dir(Path::new("a/b")));
@@ -221,7 +223,7 @@ fn test_osfs_basic() {
     let content = "hello osfs";
 
     {
-        let fs_mut = OsFs {};
+        let mut fs_mut = OsFs {};
         let mut writer = fs_mut.writer(&path).unwrap();
         writer.write_all(content.as_bytes()).unwrap();
     }

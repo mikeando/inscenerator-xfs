@@ -64,12 +64,15 @@ pub trait Xfs: Send {
     ///
     /// # Safety
     ///
-    /// This is named `unsafe_clone` because it breaks the normal Rust expectation
-    /// that a clone is an independent copy. Here, any mutation performed on the
-    /// clone will be visible to the original and all other clones.
+    /// This is named `unsafe_clone` because it provides no safety for concurrent
+    /// changes to the same parts of the filesystem. It will be safe for operating
+    /// on distinct parts, but that is up to the user to ensure.
     ///
-    /// The returned object is `Send`, allowing it to be moved to another thread
-    /// to perform concurrent operations on the same filesystem.
+    /// For example, moving a directory on one thread while another thread is
+    /// writing into a file inside that directory is undefined and should be avoided.
+    ///
+    /// Any mutation performed on the clone will be visible to the original and
+    /// all other clones.
     fn unsafe_clone(&self) -> Box<dyn Xfs + Send>;
 
     /// Returns an iterator over the entries within a directory.

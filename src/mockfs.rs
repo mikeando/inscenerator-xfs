@@ -357,7 +357,7 @@ impl XfsMetadata for MockMetadata {
 }
 
 impl Xfs for MockFS {
-    fn unsafe_clone(&self) -> Box<dyn Xfs + Send> {
+    fn unsafe_clone(&self) -> Box<dyn Xfs> {
         Box::new(MockFS {
             root: self.root.clone(),
         })

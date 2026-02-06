@@ -73,7 +73,7 @@ pub trait Xfs: Send {
     ///
     /// Any mutation performed on the clone will be visible to the original and
     /// all other clones.
-    fn unsafe_clone(&self) -> Box<dyn Xfs + Send>;
+    fn unsafe_clone(&self) -> Box<dyn Xfs>;
 
     /// Returns an iterator over the entries within a directory.
     ///
@@ -175,7 +175,7 @@ impl XfsMetadata for std::fs::Metadata {
 }
 
 impl Xfs for OsFs {
-    fn unsafe_clone(&self) -> Box<dyn Xfs + Send> {
+    fn unsafe_clone(&self) -> Box<dyn Xfs> {
         Box::new(OsFs {})
     }
 

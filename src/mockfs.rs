@@ -1,19 +1,18 @@
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 use crate::{Result, Xfs, XfsDirEntry, XfsError, XfsMetadata, XfsReadDir, AlreadyExistsSnafu, NotADirectorySnafu, NotAFileSnafu, GeneralSnafu};
 
 pub struct MockWriter {
-    data: Rc<RefCell<Vec<u8>>>,
+    data: Arc<RwLock<Vec<u8>>>,
 }
 
 impl Write for MockWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut data = self.data.borrow_mut();
+        let mut data = self.data.write().unwrap();
         data.extend_from_slice(buf);
         Ok(buf.len())
     }
@@ -25,12 +24,12 @@ impl Write for MockWriter {
 
 pub struct MockReader {
     index: usize,
-    data: Rc<RefCell<Vec<u8>>>,
+    data: Arc<RwLock<Vec<u8>>>,
 }
 
 impl Read for MockReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let data = self.data.borrow();
+        let data = self.data.read().unwrap();
         let read_slice = &(*data)[self.index..];
         let read_len = usize::min(buf.len(), read_slice.len());
         if read_len > 0 {
@@ -57,7 +56,7 @@ impl MockFSDirectoryEntry {
     pub fn create_file(
         &mut self,
         pc: &OsStr,
-        contents: Rc<RefCell<Vec<u8>>>,
+        contents: Arc<RwLock<Vec<u8>>>,
     ) -> Result<&MockFSFileEntry> {
         if self.entries.contains_key(pc) {
             return AlreadyExistsSnafu {
@@ -89,7 +88,7 @@ impl MockFSDirectoryEntry {
 
 #[derive(Debug)]
 pub struct MockFSFileEntry {
-    pub contents: Rc<RefCell<Vec<u8>>>,
+    pub contents: Arc<RwLock<Vec<u8>>>,
 }
 
 #[derive(Debug)]
@@ -158,13 +157,13 @@ impl MockFSEntry {
 
 #[derive(Debug)]
 pub struct MockFS {
-    pub root: MockFSEntry,
+    pub root: Arc<RwLock<MockFSEntry>>,
 }
 
 impl MockFS {
     pub fn new() -> MockFS {
         MockFS {
-            root: MockFSEntry::Directory(MockFSDirectoryEntry::default()),
+            root: Arc::new(RwLock::new(MockFSEntry::Directory(MockFSDirectoryEntry::default()))),
         }
     }
 
@@ -192,35 +191,38 @@ impl MockFS {
         Ok(result)
     }
 
-    pub fn add_r(&mut self, p: &Path, contents: Vec<u8>) -> Result<()> {
+    pub fn add_r(&self, p: &Path, contents: Vec<u8>) -> Result<()> {
         let p_comp: Vec<&OsStr> = Self::normalize_path(p)?;
         if p_comp.is_empty() {
             return Ok(());
         }
 
-        let mut dir = self.root.as_dir_mut().map_err(|_| XfsError::NotADirectory { path: PathBuf::from("/") })?;
+        let mut root = self.root.write().unwrap();
+        let dir = root.as_dir_mut().map_err(|_| XfsError::NotADirectory { path: PathBuf::from("/") })?;
+        let mut current_dir = dir;
         for pc in &p_comp[..p_comp.len() - 1] {
-            dir = dir.get_or_create_dir(pc)?;
+            current_dir = current_dir.get_or_create_dir(pc)?;
         }
         let pc = p_comp[p_comp.len() - 1];
-        let contents = Rc::new(RefCell::new(contents));
-        dir.create_file(pc, contents)?;
+        let contents = Arc::new(RwLock::new(contents));
+        current_dir.create_file(pc, contents)?;
         Ok(())
     }
 
-    pub fn add_file<S: AsRef<str>>(&mut self, p: &Path, contents: S) -> Result<()> {
+    pub fn add_file<S: AsRef<str>>(&self, p: &Path, contents: S) -> Result<()> {
         self.add_r(p, contents.as_ref().as_bytes().to_vec())
     }
 
     pub fn get(&self, p: &Path) -> Result<Vec<u8>> {
-        let f = self
-            .resolve_path(p)?
+        let root = self.root.read().unwrap();
+        let f = Self::resolve_path(&root, p)?
             .as_file().map_err(|_| XfsError::NotAFile { path: p.to_path_buf() })?;
-        Ok(f.contents.borrow().clone())
+        let data = f.contents.read().unwrap().clone();
+        Ok(data)
     }
 
-    pub fn resolve_path(&self, p: &Path) -> Result<&MockFSEntry> {
-        let mut result = &self.root;
+    pub fn resolve_path<'a>(root: &'a MockFSEntry, p: &Path) -> Result<&'a MockFSEntry> {
+        let mut result = root;
         for pc in Self::normalize_path(p)? {
             result = result.child(pc).map_err(|_| XfsError::NotFound {
                 path: p.to_path_buf(),
@@ -229,8 +231,8 @@ impl MockFS {
         Ok(result)
     }
 
-    pub fn resolve_path_mut(&mut self, p: &Path) -> Result<&mut MockFSEntry> {
-        let mut result = &mut self.root;
+    pub fn resolve_path_mut<'a>(root: &'a mut MockFSEntry, p: &Path) -> Result<&'a mut MockFSEntry> {
+        let mut result = root;
         for pc in Self::normalize_path(p)? {
             result = result.child_mut(pc).map_err(|_| XfsError::NotFound {
                 path: p.to_path_buf(),
@@ -240,7 +242,8 @@ impl MockFS {
     }
 
     pub fn tree(&self) -> String {
-        Self::tree_(&OsString::from("/"), &self.root, "")
+        let root = self.root.read().unwrap();
+        Self::tree_(&OsString::from("/"), &root, "")
     }
 
     fn tree_(pc: &OsStr, e: &MockFSEntry, prefix: &str) -> String {
@@ -254,7 +257,7 @@ impl MockFS {
                 s
             }
             MockFSEntry::File(f) => {
-                let data = f.contents.borrow();
+                let data = f.contents.read().unwrap();
                 match std::str::from_utf8(data.as_slice()) {
                     Ok(s) => format!("{}{:?} => {:?}\n", prefix, pc, s),
                     Err(_) => format!("{}{:?} => BINARY DATA\n", prefix, pc),
@@ -264,7 +267,7 @@ impl MockFS {
     }
 
     pub fn copy_recursive(
-        &mut self,
+        &self,
         other_fs: &dyn Xfs,
         other_path: &Path,
         self_path: &Path,
@@ -332,7 +335,7 @@ impl XfsDirEntry for MockDirEntry {
         self.path.clone()
     }
 
-    fn metadata(&self) -> Result<Box<dyn XfsMetadata>> {
+    fn metadata(&self) -> Result<Box<dyn XfsMetadata + Send + Sync>> {
         Ok(Box::new(self.metadata.clone()))
     }
 }
@@ -355,13 +358,13 @@ impl XfsMetadata for MockMetadata {
 
 impl Xfs for MockFS {
     fn read_dir(&self, p: &Path) -> Result<XfsReadDir> {
-        let dir = self
-            .resolve_path(p)
+        let root = self.root.read().unwrap();
+        let dir = Self::resolve_path(&root, p)
             .map_err(|_| XfsError::NotFound { path: p.to_path_buf() })?
             .as_dir().map_err(|_| XfsError::NotADirectory { path: p.to_path_buf() })?;
 
-        let entries: Vec<Result<Box<dyn XfsDirEntry>>> = dir.entries.iter().map(|(k, v)| {
-            let entry: Box<dyn XfsDirEntry> = Box::new(MockDirEntry {
+        let entries: Vec<Result<Box<dyn XfsDirEntry + Send + Sync>>> = dir.entries.iter().map(|(k, v)| {
+            let entry: Box<dyn XfsDirEntry + Send + Sync> = Box::new(MockDirEntry {
                 path: p.join(k),
                 metadata: v.metadata(),
             });
@@ -371,9 +374,9 @@ impl Xfs for MockFS {
         Ok(Box::new(entries.into_iter()))
     }
 
-    fn reader(&self, p: &Path) -> Result<Box<dyn std::io::Read>> {
-        let f = self
-            .resolve_path(p)
+    fn reader(&self, p: &Path) -> Result<Box<dyn std::io::Read + Send>> {
+        let root = self.root.read().unwrap();
+        let f = Self::resolve_path(&root, p)
             .map_err(|_| XfsError::NotFound { path: p.to_path_buf() })?
             .as_file().map_err(|_| XfsError::NotAFile { path: p.to_path_buf() })?;
 
@@ -384,23 +387,24 @@ impl Xfs for MockFS {
         Ok(Box::new(r))
     }
 
-    fn writer(&mut self, p: &Path) -> Result<Box<dyn std::io::Write>> {
+    fn writer(&self, p: &Path) -> Result<Box<dyn std::io::Write + Send>> {
         let pp = p.parent().ok_or_else(|| {
             XfsError::NotFound {
                 path: p.to_path_buf(),
             }
         })?;
-        let parent_dir = self.resolve_path_mut(pp).map_err(|_| XfsError::NotFound { path: pp.to_path_buf() })?
+        let mut root = self.root.write().unwrap();
+        let parent_dir = Self::resolve_path_mut(&mut root, pp).map_err(|_| XfsError::NotFound { path: pp.to_path_buf() })?
             .as_dir_mut().map_err(|_| XfsError::NotADirectory { path: pp.to_path_buf() })?;
 
-        let data = Rc::new(RefCell::new(Vec::new()));
+        let data = Arc::new(RwLock::new(Vec::new()));
         parent_dir.create_file(p.file_name().unwrap(), data.clone())?;
 
         let w = MockWriter { data };
         Ok(Box::new(w))
     }
 
-    fn create_dir(&mut self, p: &Path) -> Result<()> {
+    fn create_dir(&self, p: &Path) -> Result<()> {
         // The root always exists, so we can't create it
         if p.as_os_str().is_empty() || p == Path::new("/") {
             return AlreadyExistsSnafu {
@@ -413,29 +417,30 @@ impl Xfs for MockFS {
                 path: p.to_path_buf(),
             }
         })?;
-        let parent_dir = self
-            .resolve_path_mut(pp)
+        let mut root = self.root.write().unwrap();
+        let parent_dir = Self::resolve_path_mut(&mut root, pp)
             .map_err(|_| XfsError::NotFound { path: pp.to_path_buf() })?
             .as_dir_mut().map_err(|_| XfsError::NotADirectory { path: pp.to_path_buf() })?;
         parent_dir.create_dir(p.file_name().unwrap())?;
         Ok(())
     }
 
-    fn create_dir_all(&mut self, p: &Path) -> Result<()> {
+    fn create_dir_all(&self, p: &Path) -> Result<()> {
         let p_comp: Vec<&OsStr> = Self::normalize_path(p)?;
-        let mut root = self.root.as_dir_mut().map_err(|_| XfsError::NotADirectory { path: PathBuf::from("/") })?;
+        let mut root_lock = self.root.write().unwrap();
+        let mut root = root_lock.as_dir_mut().map_err(|_| XfsError::NotADirectory { path: PathBuf::from("/") })?;
         for pc in p_comp {
             root = root.get_or_create_dir(pc)?;
         }
         Ok(())
     }
 
-    fn remove_file(&mut self, p: &Path) -> Result<()> {
+    fn remove_file(&self, p: &Path) -> Result<()> {
         let pp = p.parent().ok_or_else(|| XfsError::NotFound {
             path: p.to_path_buf(),
         })?;
-        let parent_dir = self
-            .resolve_path_mut(pp)
+        let mut root = self.root.write().unwrap();
+        let parent_dir = Self::resolve_path_mut(&mut root, pp)
             .map_err(|_| XfsError::NotFound {
                 path: pp.to_path_buf(),
             })?
@@ -463,12 +468,12 @@ impl Xfs for MockFS {
         }
     }
 
-    fn remove_dir_all(&mut self, p: &Path) -> Result<()> {
+    fn remove_dir_all(&self, p: &Path) -> Result<()> {
         let pp = p.parent().ok_or_else(|| XfsError::NotFound {
             path: p.to_path_buf(),
         })?;
-        let parent_dir = self
-            .resolve_path_mut(pp)
+        let mut root = self.root.write().unwrap();
+        let parent_dir = Self::resolve_path_mut(&mut root, pp)
             .map_err(|_| XfsError::NotFound {
                 path: pp.to_path_buf(),
             })?
@@ -496,7 +501,7 @@ impl Xfs for MockFS {
         }
     }
 
-    fn rename(&mut self, from: &Path, to: &Path) -> Result<()> {
+    fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         if from == to {
             return Ok(());
         }
@@ -514,11 +519,13 @@ impl Xfs for MockFS {
             path: to.to_path_buf(),
         })?;
 
+        let mut root = self.root.write().unwrap();
+
         // 1. Ensure 'from' exists.
-        self.resolve_path(from)?;
+        Self::resolve_path(&root, from)?;
 
         // 2. Ensure 'to' parent exists and is a directory.
-        self.resolve_path(to_pp)?
+        Self::resolve_path(&root, to_pp)?
             .as_dir()
             .map_err(|_| XfsError::NotADirectory {
                 path: to_pp.to_path_buf(),
@@ -526,8 +533,7 @@ impl Xfs for MockFS {
 
         // 3. Perform the move.
         let entry = {
-            let from_parent = self
-                .resolve_path_mut(from_pp)?
+            let from_parent = Self::resolve_path_mut(&mut root, from_pp)?
                 .as_dir_mut()
                 .map_err(|_| XfsError::NotADirectory {
                     path: from_pp.to_path_buf(),
@@ -535,8 +541,7 @@ impl Xfs for MockFS {
             from_parent.entries.remove(from_name).unwrap() // We already checked it exists
         };
 
-        let to_parent = self
-            .resolve_path_mut(to_pp)?
+        let to_parent = Self::resolve_path_mut(&mut root, to_pp)?
             .as_dir_mut()
             .unwrap(); // We already checked it exists and is a dir
 
@@ -546,22 +551,23 @@ impl Xfs for MockFS {
     }
 
     fn read_all_lines(&self, p: &Path) -> Result<Vec<String>> {
-        let file = self
-            .resolve_path(p)
+        let root = self.root.read().unwrap();
+        let file = Self::resolve_path(&root, p)
             .map_err(|_| XfsError::NotFound { path: p.to_path_buf() })?
             .as_file().map_err(|_| XfsError::NotAFile { path: p.to_path_buf() })?;
-        let data = file.contents.borrow();
+        let data = file.contents.read().unwrap();
 
         let s = std::str::from_utf8(data.as_slice())
             .map_err(|_| XfsError::InvalidUtf8 {
                 path: p.to_path_buf(),
             })?;
-        Ok(s.lines().map(|s| s.to_string()).collect())
+        let lines = s.lines().map(|s| s.to_string()).collect();
+        Ok(lines)
     }
 
-    fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata>> {
-        let entry = self
-            .resolve_path(p)
+    fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata + Send + Sync>> {
+        let root = self.root.read().unwrap();
+        let entry = Self::resolve_path(&root, p)
             .map_err(|_| XfsError::NotFound { path: p.to_path_buf() })?;
         Ok(Box::new(entry.metadata()))
     }

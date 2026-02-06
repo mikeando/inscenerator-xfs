@@ -44,22 +44,22 @@ pub enum XfsError {
 pub type Result<T> = std::result::Result<T, XfsError>;
 
 /// A result type for a single directory entry.
-pub type XfsEntryResult = Result<Box<dyn XfsDirEntry>>;
+pub type XfsEntryResult = Result<Box<dyn XfsDirEntry + Send + Sync>>;
 
 /// An iterator over directory entries.
-pub type XfsReadDir = Box<dyn Iterator<Item = XfsEntryResult>>;
+pub type XfsReadDir = Box<dyn Iterator<Item = XfsEntryResult> + Send>;
 
-pub trait XfsDirEntry {
+pub trait XfsDirEntry: Send + Sync {
     fn path(&self) -> PathBuf;
-    fn metadata(&self) -> Result<Box<dyn XfsMetadata>>;
+    fn metadata(&self) -> Result<Box<dyn XfsMetadata + Send + Sync>>;
 }
 
-pub trait XfsMetadata {
+pub trait XfsMetadata: Send + Sync {
     fn is_dir(&self) -> bool;
     fn is_file(&self) -> bool;
 }
 
-pub trait Xfs {
+pub trait Xfs: Send + Sync {
     /// Returns an iterator over the entries within a directory.
     ///
     /// The iterator does not borrow the filesystem object, allowing
@@ -85,12 +85,12 @@ pub trait Xfs {
     /// ```
     fn read_dir(&self, p: &Path) -> Result<XfsReadDir>;
 
-    fn reader(&self, p: &Path) -> Result<Box<dyn Read>>;
-    fn writer(&mut self, p: &Path) -> Result<Box<dyn Write>>;
+    fn reader(&self, p: &Path) -> Result<Box<dyn Read + Send>>;
+    fn writer(&self, p: &Path) -> Result<Box<dyn Write + Send>>;
 
-    fn create_dir(&mut self, p: &Path) -> Result<()>;
+    fn create_dir(&self, p: &Path) -> Result<()>;
 
-    fn create_dir_all(&mut self, p: &Path) -> Result<()>;
+    fn create_dir_all(&self, p: &Path) -> Result<()>;
 
     /// Deletes a single file.
     ///
@@ -98,7 +98,7 @@ pub trait Xfs {
     ///
     /// Returns an error if the path does not exist, is a directory, or
     /// if there is an IO error.
-    fn remove_file(&mut self, p: &Path) -> Result<()>;
+    fn remove_file(&self, p: &Path) -> Result<()>;
 
     /// Deletes a directory and all its contents.
     ///
@@ -106,7 +106,7 @@ pub trait Xfs {
     ///
     /// Returns an error if the path does not exist, is not a directory, or
     /// if there is an IO error.
-    fn remove_dir_all(&mut self, p: &Path) -> Result<()>;
+    fn remove_dir_all(&self, p: &Path) -> Result<()>;
 
     /// Renames or moves a file or directory.
     ///
@@ -114,11 +114,11 @@ pub trait Xfs {
     ///
     /// Returns an error if the source path does not exist, or if there is
     /// an IO error.
-    fn rename(&mut self, from: &Path, to: &Path) -> Result<()>;
+    fn rename(&self, from: &Path, to: &Path) -> Result<()>;
 
     fn read_all_lines(&self, p: &Path) -> Result<Vec<String>>;
 
-    fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata>>;
+    fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata + Send + Sync>>;
 
     /// IO Errors are treated as-if the file does not exist.
     fn exists(&self, p: &Path) -> bool {
@@ -143,7 +143,7 @@ impl XfsDirEntry for std::fs::DirEntry {
         std::fs::DirEntry::path(self)
     }
 
-    fn metadata(&self) -> Result<Box<dyn XfsMetadata>> {
+    fn metadata(&self) -> Result<Box<dyn XfsMetadata + Send + Sync>> {
         let md = std::fs::DirEntry::metadata(self).context(IoSnafu { path: self.path() })?;
         Ok(Box::new(md))
     }
@@ -165,43 +165,43 @@ impl Xfs for OsFs {
         let read_dir = std::fs::read_dir(p).context(IoSnafu { path: p })?;
         let iter = read_dir.map(move |entry| {
             let entry = entry.context(IoSnafu { path: &path_buf })?;
-            let entry: Box<dyn XfsDirEntry> = Box::new(entry);
+            let entry: Box<dyn XfsDirEntry + Send + Sync> = Box::new(entry);
             Ok(entry)
         });
         Ok(Box::new(iter))
     }
 
-    fn writer(&mut self, p: &Path) -> Result<Box<dyn Write>> {
+    fn writer(&self, p: &Path) -> Result<Box<dyn Write + Send>> {
         let file = std::fs::File::create(p).context(IoSnafu { path: p })?;
         Ok(Box::new(BufWriter::new(file)))
     }
 
-    fn reader(&self, p: &Path) -> Result<Box<dyn Read>> {
+    fn reader(&self, p: &Path) -> Result<Box<dyn Read + Send>> {
         let file = std::fs::File::open(p).context(IoSnafu { path: p })?;
         Ok(Box::new(BufReader::new(file)))
     }
 
-    fn create_dir(&mut self, p: &Path) -> Result<()> {
+    fn create_dir(&self, p: &Path) -> Result<()> {
         std::fs::create_dir(p).context(IoSnafu { path: p })?;
         Ok(())
     }
 
-    fn create_dir_all(&mut self, p: &Path) -> Result<()> {
+    fn create_dir_all(&self, p: &Path) -> Result<()> {
         std::fs::create_dir_all(p).context(IoSnafu { path: p })?;
         Ok(())
     }
 
-    fn remove_file(&mut self, p: &Path) -> Result<()> {
+    fn remove_file(&self, p: &Path) -> Result<()> {
         std::fs::remove_file(p).context(IoSnafu { path: p })?;
         Ok(())
     }
 
-    fn remove_dir_all(&mut self, p: &Path) -> Result<()> {
+    fn remove_dir_all(&self, p: &Path) -> Result<()> {
         std::fs::remove_dir_all(p).context(IoSnafu { path: p })?;
         Ok(())
     }
 
-    fn rename(&mut self, from: &Path, to: &Path) -> Result<()> {
+    fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         std::fs::rename(from, to).context(IoSnafu { path: from })?;
         Ok(())
     }
@@ -212,7 +212,7 @@ impl Xfs for OsFs {
         lines.context(IoSnafu { path: p })
     }
 
-    fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata>> {
+    fn metadata(&self, p: &Path) -> Result<Box<dyn XfsMetadata + Send + Sync>> {
         let m = std::fs::metadata(p).context(IoSnafu { path: p })?;
         Ok(Box::new(m))
     }

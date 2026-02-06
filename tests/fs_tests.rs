@@ -49,27 +49,36 @@ fn test_mockfs_rename() {
 }
 
 #[test]
-fn test_osfs_remove_rename() {
+fn test_osfs_remove_file() {
     let temp_dir = tempfile::tempdir().unwrap();
     let mut fs = OsFs {};
     let path = temp_dir.path().join("test.txt");
 
-    // Test remove_file
     fs.writer(&path).unwrap().write_all(b"hello").unwrap();
     assert!(fs.exists(&path));
     fs.remove_file(&path).unwrap();
     assert!(!fs.exists(&path));
+}
 
-    // Test rename
+#[test]
+fn test_osfs_rename() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut fs = OsFs {};
     let old_path = temp_dir.path().join("old.txt");
     let new_path = temp_dir.path().join("new.txt");
+
     fs.writer(&old_path).unwrap().write_all(b"content").unwrap();
     fs.rename(&old_path, &new_path).unwrap();
     assert!(!fs.exists(&old_path));
     assert!(fs.exists(&new_path));
+}
 
-    // Test remove_dir_all
+#[test]
+fn test_osfs_remove_dir_all() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut fs = OsFs {};
     let dir_path = temp_dir.path().join("dir");
+
     fs.create_dir(&dir_path).unwrap();
     fs.writer(&dir_path.join("file.txt"))
         .unwrap()
@@ -80,18 +89,28 @@ fn test_osfs_remove_rename() {
 }
 
 #[test]
-fn test_mockfs_errors() {
+fn test_mockfs_remove_file_error() {
     let mut fs = MockFS::new();
     fs.create_dir(Path::new("dir")).unwrap();
 
     // remove_file on a directory should fail
     let res = fs.remove_file(Path::new("dir"));
     assert!(res.is_err());
+}
+
+#[test]
+fn test_mockfs_remove_dir_all_error() {
+    let mut fs = MockFS::new();
+    fs.add_file(Path::new("file.txt"), "content").unwrap();
 
     // remove_dir_all on a file should fail
-    fs.add_file(Path::new("file.txt"), "content").unwrap();
     let res = fs.remove_dir_all(Path::new("file.txt"));
     assert!(res.is_err());
+}
+
+#[test]
+fn test_mockfs_rename_error() {
+    let mut fs = MockFS::new();
 
     // rename non-existent should fail
     let res = fs.rename(Path::new("none"), Path::new("new"));

@@ -92,10 +92,28 @@ pub trait Xfs {
 
     fn create_dir_all(&mut self, p: &Path) -> Result<()>;
 
+    /// Deletes a single file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path does not exist, is a directory, or
+    /// if there is an IO error.
     fn remove_file(&mut self, p: &Path) -> Result<()>;
 
+    /// Deletes a directory and all its contents.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path does not exist, is not a directory, or
+    /// if there is an IO error.
     fn remove_dir_all(&mut self, p: &Path) -> Result<()>;
 
+    /// Renames or moves a file or directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the source path does not exist, or if there is
+    /// an IO error.
     fn rename(&mut self, from: &Path, to: &Path) -> Result<()>;
 
     fn read_all_lines(&self, p: &Path) -> Result<Vec<String>>;

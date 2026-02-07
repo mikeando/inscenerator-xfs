@@ -9,27 +9,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `MockFS::get_str` for easier reading of UTF-8 file contents.
 
 ### Changed
-- Improved thread safety and internal path resolution in `MockFS`.
+- Refactored `MockFS` methods (including `resolve_path`, `as_dir`, and `as_file`) to return owned objects rather than references, simplifying multi-threaded access.
+- Improved internal path resolution and thread safety across `MockFS`.
 
 ## [0.1.2]
 ### Added
-- `XfsReadOnly` trait to provide a read-only interface, with `Xfs` now inheriting from it to enforce mutability constraints.
-- `unsafe_clone` and `unsafe_clone_mut` methods for sharing filesystem handles across threads.
-- `remove_file`, `remove_dir_all`, and `rename` operations to the `Xfs` trait.
-- `Send` bounds on traits to support multi-threaded applications.
+- `XfsReadOnly` trait for read-only filesystem access, with `Xfs` inheriting from it to separate mutable operations.
+- `unsafe_clone` and `unsafe_clone_mut` methods for sharing handles between threads.
+- New `Xfs` operations: `remove_file`, `remove_dir_all`, and `rename`.
+- `Send` bounds for traits to support concurrent applications.
 
 ### Changed
-- Major documentation update in README with comprehensive usage examples.
-- Internal refactoring of `MockFS` to use shared state (Arc/RwLock), enabling concurrent access.
+- Comprehensive documentation update in README with usage examples.
+- Internal `MockFS` refactor using `Arc` and `RwLock` for thread-safe shared state.
 
 ## [0.1.1]
 ### Added
-- Descriptive error variants and context using `snafu` (e.g., `NotFound`, `NotADirectory`).
-- Iterator-based `read_dir` API for easier directory traversal, replacing the previous callback-based approach.
+- Richer error context via `snafu`, introducing specific variants like `NotFound` and `NotADirectory`.
+- **Iterator-based `read_dir` API**, replacing the previous callback-based approach for more idiomatic directory traversal.
 
 ### Changed
-- Migrated error handling from `thiserror` to `snafu` and standardized on a custom `Result` type.
+- Migrated from `thiserror` to `snafu` and introduced a project-wide `Result` type.
 
 ## [0.1.0]
 - Initial release featuring the `Xfs` filesystem abstraction.
-- Includes `OsFs` for real disk access and `MockFS` for in-memory testing.
+- Includes `OsFs` (standard library wrapper) and `MockFS` (in-memory implementation).

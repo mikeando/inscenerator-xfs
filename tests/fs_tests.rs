@@ -18,6 +18,51 @@ fn test_mockfs_basic() {
 }
 
 #[test]
+fn test_mockfs_writer_truncates() {
+    let mut fs = MockFS::new();
+    let path = Path::new("test.txt");
+
+    // Write initial content
+    {
+        let mut w = fs.writer(path).unwrap();
+        w.write_all(b"original content").unwrap();
+    }
+
+    // Write new content, expecting truncation
+    {
+        let mut w = fs.writer(path).unwrap();
+        w.write_all(b"new").unwrap();
+    }
+
+    let content = fs.get_str(path).unwrap();
+    assert_eq!(content, "new");
+}
+
+#[test]
+fn test_mockfs_writer_errors() {
+    let mut fs = MockFS::new();
+
+    // 1. Existing directory
+    fs.create_dir(Path::new("dir")).unwrap();
+    assert!(matches!(
+        fs.writer(Path::new("dir")),
+        Err(inscenerator_xfs::XfsError::NotAFile { .. })
+    ));
+
+    // 2. Root path
+    assert!(matches!(
+        fs.writer(Path::new("/")),
+        Err(inscenerator_xfs::XfsError::NotAFile { .. })
+    ));
+
+    // 3. Empty path
+    assert!(matches!(
+        fs.writer(Path::new("")),
+        Err(inscenerator_xfs::XfsError::NotAFile { .. })
+    ));
+}
+
+#[test]
 fn test_mockfs_readonly_multithreaded() {
     use std::thread;
 

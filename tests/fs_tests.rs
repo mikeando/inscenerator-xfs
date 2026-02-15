@@ -60,6 +60,19 @@ fn test_mockfs_writer_errors() {
         fs.writer(Path::new("")),
         Err(inscenerator_xfs::XfsError::NotAFile { .. })
     ));
+
+    // 4. Parent path is a file
+    fs.add_file(Path::new("file.txt"), "content").unwrap();
+    assert!(matches!(
+        fs.writer(Path::new("file.txt/new.txt")),
+        Err(inscenerator_xfs::XfsError::NotADirectory { .. })
+    ));
+
+    // 5. Parent path does not exist
+    assert!(matches!(
+        fs.writer(Path::new("non_existent/new.txt")),
+        Err(inscenerator_xfs::XfsError::NotFound { .. })
+    ));
 }
 
 #[test]

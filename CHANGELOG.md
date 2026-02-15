@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.4]
+### Added
+- (dev) Added precommit hooks for `cargo fmt` and `cargo cliipy` and other minor checks.
+
+### Changed
+- `MockFS::writer` is now more consistent with OsFS
+
+
 ## [0.1.3]
 ### Added
 - `MockFS::get_str` for easier reading of UTF-8 file contents.

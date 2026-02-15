@@ -418,16 +418,57 @@ impl Xfs for MockFS {
     }
 
     fn writer(&mut self, p: &Path) -> Result<Box<dyn std::io::Write>> {
-        let pp = p.parent().ok_or_else(|| {
-            XfsError::NotFound {
-                path: p.to_path_buf(),
+        let pp = if let Some(pp) = p.parent() {
+            pp
+        } else {
+            if p.as_os_str().is_empty() || p == Path::new("/") {
+                return NotAFileSnafu {
+                    path: p.to_path_buf(),
+                }
+                .fail();
             }
+            return Err(XfsError::NotFound {
+                path: p.to_path_buf(),
+            });
+        };
+
+        let file_name = p.file_name().ok_or_else(|| XfsError::NotAFile {
+            path: p.to_path_buf(),
         })?;
-        let parent_dir = self.resolve_path(pp).map_err(|_| XfsError::NotFound { path: pp.to_path_buf() })?
-            .as_dir().map_err(|_| XfsError::NotADirectory { path: pp.to_path_buf() })?;
+
+        let parent_dir = self.resolve_path(pp)
+            .map_err(|_| XfsError::NotFound {
+                path: pp.to_path_buf(),
+            })?
+            .as_dir()
+            .map_err(|_| XfsError::NotADirectory {
+                path: pp.to_path_buf(),
+            })?;
+
+        let mut entries = parent_dir.entries.write().unwrap();
+        if let Some(entry) = entries.get(file_name) {
+            match entry {
+                MockFSEntry::File(f) => {
+                    f.contents.write().unwrap().clear();
+                    let w = MockWriter {
+                        data: f.contents.clone(),
+                    };
+                    return Ok(Box::new(w));
+                }
+                MockFSEntry::Directory(_) => {
+                    return NotAFileSnafu {
+                        path: p.to_path_buf(),
+                    }
+                    .fail();
+                }
+            }
+        }
 
         let data = Arc::new(RwLock::new(Vec::new()));
-        parent_dir.create_file(p.file_name().unwrap(), data.clone())?;
+        let file = MockFSFileEntry {
+            contents: data.clone(),
+        };
+        entries.insert(file_name.to_os_string(), MockFSEntry::File(file));
 
         let w = MockWriter { data };
         Ok(Box::new(w))

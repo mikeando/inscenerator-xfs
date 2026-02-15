@@ -1,5 +1,5 @@
+use inscenerator_xfs::{mockfs::MockFS, Xfs, XfsReadOnly};
 use std::path::Path;
-use inscenerator_xfs::{Xfs, XfsReadOnly, mockfs::MockFS};
 
 #[test]
 fn test_unsafe_clone_is_readonly() {

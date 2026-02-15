@@ -1,7 +1,7 @@
-use inscenerator_xfs::{OsFs, Xfs, XfsReadOnly};
 use inscenerator_xfs::mockfs::MockFS;
-use std::path::Path;
+use inscenerator_xfs::{OsFs, Xfs, XfsReadOnly};
 use std::io::{Read, Write};
+use std::path::Path;
 
 #[test]
 fn test_mockfs_basic() {
@@ -87,7 +87,11 @@ fn test_mockfs_writable_clone() {
     let mut fs = MockFS::new();
     let mut fs_clone = fs.unsafe_clone_mut();
 
-    fs_clone.writer(Path::new("test.txt")).unwrap().write_all(b"hello").unwrap();
+    fs_clone
+        .writer(Path::new("test.txt"))
+        .unwrap()
+        .write_all(b"hello")
+        .unwrap();
 
     assert!(fs.is_file(Path::new("test.txt")));
 }
@@ -117,7 +121,8 @@ fn test_mockfs_remove_dir_all() {
 fn test_mockfs_rename() {
     let mut fs = MockFS::new();
     fs.add_file(Path::new("old.txt"), "content").unwrap();
-    fs.rename(Path::new("old.txt"), Path::new("new.txt")).unwrap();
+    fs.rename(Path::new("old.txt"), Path::new("new.txt"))
+        .unwrap();
     assert!(!fs.exists(Path::new("old.txt")));
     assert!(fs.is_file(Path::new("new.txt")));
     assert_eq!(fs.get(Path::new("new.txt")).unwrap(), b"content");
@@ -199,13 +204,17 @@ fn test_mockfs_copy_recursive() {
     fs1.add_file(Path::new("dir/subdir/b.txt"), "b").unwrap();
 
     let mut fs2 = MockFS::new();
-    fs2.copy_recursive(&fs1, Path::new("dir"), Path::new("copied")).unwrap();
+    fs2.copy_recursive(&fs1, Path::new("dir"), Path::new("copied"))
+        .unwrap();
 
     assert!(fs2.is_file(Path::new("copied/a.txt")));
     assert!(fs2.is_file(Path::new("copied/subdir/b.txt")));
 
     let mut buf = String::new();
-    fs2.reader(Path::new("copied/subdir/b.txt")).unwrap().read_to_string(&mut buf).unwrap();
+    fs2.reader(Path::new("copied/subdir/b.txt"))
+        .unwrap()
+        .read_to_string(&mut buf)
+        .unwrap();
     assert_eq!(buf, "b");
 }
 

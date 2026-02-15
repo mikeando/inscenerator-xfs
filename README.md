@@ -1,7 +1,7 @@
 # inscenerator-xfs
 
 `inscenerator-xfs` is a Rust library providing a filesystem abstraction layer. It defines a common interface for
-filesystem operations, allowing you to write code that can run against the real operating system filesystem or an in-memory 
+filesystem operations, allowing you to write code that can run against the real operating system filesystem or an in-memory
 mock filesystem.
 
 This is particularly useful for unit testing code that performs filesystem operations without actually hitting the disk.
@@ -120,6 +120,29 @@ Note: These are called "unsafe" because they do not provide protection against c
 
 - Better support for in-memory filesystems.
 - Support for archive filesystems (e.g., ZIP, TAR).
+
+## Development
+
+### Pre-commit Hooks
+
+This repository uses [pre-commit](https://pre-commit.com/) to ensure code quality. The hooks run `cargo clippy`, `cargo fmt`, and several other checks.
+
+#### Installation
+
+1. Install `pre-commit`:
+   ```bash
+   pip install pre-commit
+   ```
+
+2. Install the git hook scripts:
+   ```bash
+   pre-commit install
+   ```
+
+Now, `pre-commit` will run automatically on every `git commit`. You can also run it manually on all files:
+```bash
+pre-commit run --all-files
+```
 
 ## About
 
